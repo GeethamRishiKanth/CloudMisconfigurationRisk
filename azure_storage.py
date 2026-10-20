@@ -1,3 +1,4 @@
+
 import os
 from pathlib import Path
 
@@ -6,50 +7,55 @@ from dotenv import load_dotenv
 from azure.storage.blob import BlobServiceClient
 
 
+# =====================================================
+# LOAD CONFIGURATION
+# =====================================================
+
+load_dotenv()
+
+
+def get_config(name):
+    """Read configuration from environment variables or Streamlit Secrets."""
+
+    value = os.getenv(name)
+
+    if value:
+        return value
+
+    try:
+        import streamlit as st
+        value = st.secrets.get(name)
+    except Exception:
+        value = None
+
+    return value
+
+
+# =====================================================
+# DOWNLOAD DATASET FROM AZURE
+# =====================================================
+
 def download_dataset():
 
-    # =====================================================
-    # LOAD ENVIRONMENT VARIABLES
-    # =====================================================
+    account_name = get_config("AZURE_STORAGE_ACCOUNT_NAME")
+    account_key = get_config("AZURE_STORAGE_ACCOUNT_KEY")
+    container_name = get_config("AZURE_CONTAINER_NAME")
+    blob_name = get_config("AZURE_BLOB_NAME")
 
-    load_dotenv()
-
-    account_name = os.getenv(
-        "AZURE_STORAGE_ACCOUNT_NAME"
-    )
-
-    account_key = os.getenv(
-        "AZURE_STORAGE_ACCOUNT_KEY"
-    )
-
-    container_name = os.getenv(
-        "AZURE_CONTAINER_NAME"
-    )
-
-    blob_name = os.getenv(
-        "AZURE_BLOB_NAME"
-    )
-
-    # =====================================================
-    # VALIDATE AZURE CONFIGURATION
-    # =====================================================
-
+    # Validate configuration
     if not account_name or not account_key:
-
         raise ValueError(
-            "Azure storage credentials are missing from .env"
+            "Azure storage credentials are missing. "
+            "Configure your local .env file or Streamlit Secrets."
         )
 
     if not container_name or not blob_name:
-
         raise ValueError(
-            "Azure container name or blob name is missing from .env"
+            "Azure container name or blob name is missing. "
+            "Check your .env file or Streamlit Secrets."
         )
 
-    # =====================================================
-    # CREATE CONNECTION STRING
-    # =====================================================
-
+    # Create Azure connection string
     connection_string = (
         f"DefaultEndpointsProtocol=https;"
         f"AccountName={account_name};"
@@ -57,138 +63,61 @@ def download_dataset():
         f"EndpointSuffix=core.windows.net"
     )
 
-    # =====================================================
-    # CONNECT TO AZURE BLOB STORAGE
-    # =====================================================
-
-    blob_service_client = (
-        BlobServiceClient.from_connection_string(
-            connection_string
-        )
+    # Connect to Azure Blob Storage
+    blob_service_client = BlobServiceClient.from_connection_string(
+        connection_string
     )
 
-    blob_client = (
-        blob_service_client.get_blob_client(
-            container=container_name,
-            blob=blob_name
-        )
+    blob_client = blob_service_client.get_blob_client(
+        container=container_name,
+        blob=blob_name
     )
 
-    # =====================================================
-    # PROJECT DATA DIRECTORY
-    # =====================================================
+    # Determine project data directory
+    base_dir = Path(__file__).resolve().parent
+    data_dir = base_dir / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
 
-    base_dir = Path(
-        __file__
-    ).resolve().parent
+    download_path = data_dir / "misconfigurations.csv"
 
-    data_dir = (
-        base_dir
-        / "data"
-    )
+    # Download dataset
+    print("Downloading dataset from Azure...")
 
-    data_dir.mkdir(
-        parents=True,
-        exist_ok=True
-    )
+    with open(download_path, "wb") as file:
+        file.write(blob_client.download_blob().readall())
 
-    download_path = (
-        data_dir
-        / "misconfigurations.csv"
-    )
-
-    # =====================================================
-    # DOWNLOAD DATASET
-    # =====================================================
-
-    print(
-        "Downloading dataset from Azure..."
-    )
-
-    with open(
-        download_path,
-        "wb"
-    ) as file:
-
-        file.write(
-            blob_client
-            .download_blob()
-            .readall()
-        )
-
-    # =====================================================
-    # VERIFY DOWNLOADED DATASET
-    # =====================================================
-
+    # Verify downloaded CSV
     try:
-
         data = pd.read_csv(
             download_path,
             sep=None,
             engine="python"
         )
-
     except Exception as error:
-
         raise ValueError(
-            "Azure file was downloaded, but it could "
-            "not be read as a CSV."
+            "Azure file was downloaded, but it could not be read as a CSV."
         ) from error
 
-    # =====================================================
-    # DISPLAY DOWNLOAD INFORMATION
-    # =====================================================
+    # Display download information
+    print(f"Downloaded successfully: {download_path}")
+    print(f"Rows downloaded: {len(data):,}")
+    print(f"Columns detected: {len(data.columns)}")
 
-    print(
-        f"Downloaded successfully: {download_path}"
-    )
-
-    print(
-        f"Rows downloaded: {len(data):,}"
-    )
-
-    print(
-        f"Columns detected: {len(data.columns)}"
-    )
-
-    # =====================================================
-    # WARN IF DATASET SIZE IS NOT 2,000
-    # =====================================================
-
+    # Verify expected dataset size
     if len(data) != 2000:
-
-        print(
-            "\nWARNING:"
-        )
-
-        print(
-            "The Azure dataset does not contain "
-            "exactly 2,000 rows."
-        )
-
-        print(
-            f"Expected: 2000"
-        )
-
-        print(
-            f"Received: {len(data)}"
-        )
-
+        print("\nWARNING:")
+        print("The Azure dataset does not contain exactly 2,000 rows.")
+        print("Expected: 2000")
+        print(f"Received: {len(data)}")
     else:
+        print("Dataset size verified: 2,000 rows.")
 
-        print(
-            "Dataset size verified: 2,000 rows."
-        )
-
-    return str(
-        download_path
-    )
+    return str(download_path)
 
 
-# =========================================================
+# =====================================================
 # RUN DIRECTLY
-# =========================================================
+# =====================================================
 
 if __name__ == "__main__":
-
     download_dataset()
